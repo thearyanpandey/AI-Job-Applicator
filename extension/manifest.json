@@ -1,8 +1,14 @@
 {
     "manifest_version" : 3, 
+    "version" : "1.0.0",
     "name" : "AI Job Applicator",
-    "action" : {"default_popup": "index.html"},
-    "permission":[
+    "action" : {
+        "default_popup": "index.html",
+        "defaul_icon": "public/vite.svg",
+        "default_title": "AI JOB APPLICATOR"
+    },
+    "options_page" : "option.html",
+    "permissions":[
         "storage",
         "activeTab",
         "scripting"
@@ -10,11 +16,15 @@
     "host_permissions" : ["<all_urls>"],
     "content_scripts" : [
         {
-            "matches" : ["<all_urls>"],
-            "js" : ["src/content/index.js"]
+            "matches" : [
+                "<all_urls>",
+                "http://127.0.0.1:3000/*", 
+                "http://localhost:3000/*"
+                ],
+            "js" : ["src/content/content.js"]
         }
     ],
     "background" : {
-        "service_worker" : "src/background/index.js"
+        "service_worker" : "src/background/background.js"
     }
 }

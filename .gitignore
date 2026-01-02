@@ -1,2 +1,3 @@
 server/config/config.env 
 server/node_modules/
+extension/node_modules/
