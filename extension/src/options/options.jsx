@@ -94,7 +94,7 @@ export default function OptionsApp() {
   const handleSave = () => {
     // Save as "Default Profile" for now
     chrome.storage.local.set({ 'default_profile': formData }, () => {
-      alert("Profile Saved!");
+      alert("Profile Saved! yess");
     });
   };
 

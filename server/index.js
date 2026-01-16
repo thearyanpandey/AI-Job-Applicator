@@ -93,39 +93,6 @@ app.post('/analyze-dom', async (req, res) => {
     }
 });
 
-// app.post('/parse-resume', upload.single('resume'), async (req, res) => {
-//     try {
-//         if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-
-//         // 1. Read PDF Text
-//         const dataBuffer = fs.readFileSync(req.file.path);
-//         const pdfData = await pdf(dataBuffer);
-//         const rawText = pdfData.text.substring(0, 3000); // Limit tokens
-
-//         // 2. Ask AI to structure it
-//         const prompt = `${RESUME_PARSER_PROMPT} : ${rawText}`;
-
-//         const completion = await ai.models.generateContent({
-//             model: "gemini-2.5-flash",
-//             contents: [{role: "user", parts: [{text: prompt}]}],
-//             config: {
-//                 responseJsonSchema
-//             }
-//         });
-//         const responseText = completion.candidates[0].content.parts[0].text;
-//         console.log("Respose from Resume prompt : " + responseText);
-    
-//         // 3. Clean up temp file
-//         fs.unlinkSync(req.file.path);
-
-//         const parsedData = JSON.parse(completion.choices[0].message.content);
-//         res.json({ success: true, data: parsedData });
-
-//     } catch (error) {
-//         console.error(error);
-//         res.status(500).json({ error: "Parsing failed" });
-//     }
-// });
 
 app.post('/parse-resume', upload.single('resume'), async (req, res) => {
     try {
