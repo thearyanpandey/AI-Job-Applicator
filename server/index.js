@@ -6,6 +6,7 @@ import multer from "multer";
 import cors from "cors";
 import dotenv from "dotenv";
 import {GoogleGenAI} from "@google/genai";
+import { error } from "console";
 
 const app = express();
 const upload = multer({dest: 'uploads/'})  // temp storage for files
@@ -44,51 +45,84 @@ app.post('/generate-cover-letter', async (req, res) => {
 });
 
 app.post('/analyze-dom', async (req, res) => {
-    const {domSimplified} = req.body;
+    // Destructure the new 3-part payload
+    const { domSkeleton, jobDescription, userProfile } = req.body;
 
-    if(!domSimplified || domSimplified.length === 0){
+    console.log("🕵️‍♂️ TRIPWIRE 2 - Node Backend Received userProfile:", userProfile);
+
+    if(!domSkeleton || domSkeleton.length === 0){
         return res.status(400).json({success: false, error: "No inputs found on page"});
     }
 
-    console.log(`Analyzing ${domSimplified.length} inputs from unknown site...`);
+    console.log(`🤖 Analyzing ${domSkeleton.length} complex custom fields...`);
+
+    const hasFullResume = !!userProfile?.full_resume_data;
+    console.log(`👤 CANDIDATE: ${userProfile?.first_name || 'UNKNOWN'} ${userProfile?.last_name || 'UNKNOWN'}`);
+    console.log(`📄 FULL RESUME ATTACHED: ${hasFullResume ? '✅ YES' : '❌ NO (AI will hallucinate!)'}`);
+
+    if(!domSkeleton || domSkeleton.length === 0){
+        console.log("❌ Error: No form inputs received.");
+        return res.status(400).json({success: false, error: "No inputs found on page"});
+    }
+
+    // 2. Print the exact questions the AI is about to read
+    console.log(`\n❓ QUESTIONS TO ANSWER (${domSkeleton.length}):`);
+    domSkeleton.forEach(el => {
+        console.log(`   [${el.domId}] -> "${el.label}"`);
+    });
+    console.log("-------------------------------------------------------");
 
     try {
-        const prompt = `You are an intelligent HTML form parser. 
-        I have a list of HTML input fields from a job application site. 
-        Your goal is to map these fields to my standard User Profile keys.
+        const prompt = `You are an intelligent Job Application Assistant. 
+        I have a list of leftover HTML form fields from a job application that standard scripts couldn't autofill. 
+        These are usually custom questions (e.g., "Why do you want to work here?", "Portfolio link", "Sponsorship needs").
 
-        My Standard Keys: 
-        - first_name, last_name, full_name
-        - email, phone
-        - linkedin, github, portfolio
-        - cover_letter
-        - resume (this is for file inputs)
+        CANDIDATE PROFILE (Use this to answer questions about the applicant):
+        ${JSON.stringify(userProfile)}
 
-        Here are the Input Fields from the website:
-        ${JSON.stringify(domSimplified)}
+        JOB DESCRIPTION (Use this to tailor specific answers to the company):
+        ${jobDescription || "No job description provided."}
+
+        FORM FIELDS TO ANSWER:
+        ${JSON.stringify(domSkeleton)}
 
         INSTRUCTIONS:
-        1. Return a JSON object where the KEY is my "Standard Key" and the VALUE is the "id" or "selector" from the input list.
-        2. Only include fields you are confident about.
-        3. If a field matches "Full Name" but I only have "first_name" and "last_name", map it to "full_name".
-        4. Return ONLY the JSON object. No markdown, no text.
+        1. Return a JSON object where the KEY is the "domId" of the field, and the VALUE is the exact string you want to type into that field.
+        2. If a field asks for a portfolio, GitHub, or LinkedIn, pull the exact URL from the Candidate Profile.
+        3. If it is a complex text question (e.g., "Tell me about a time you improved a design system..."), write a concise, professional 1-3 sentence answer. Base the answer on the Candidate Profile and tailor it to the Job Description.
+        4. If it's a Yes/No or dropdown question (e.g., "Require sponsorship?"), infer the best answer from the profile or default to standard safe answers.
+        5. DO NOT use flowery AI vocabulary like 'delve', 'testament', or 'tapestry'. Keep it highly professional and human.
+        6. Return ONLY valid JSON. No markdown formatting blocks.
+        
+        Example Output:
+        {
+          "ai_ref_4": "https://github.com/myusername",
+          "ai_ref_5": "In my previous role, I migrated our legacy codebase to a modern React architecture, which improved rendering speeds by 30%. I would bring this same focus on efficiency to your engineering team.",
+          "ai_ref_6": "No"
+        }
         `;
 
         const completion = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{role: "user", parts: [{text: prompt}]}],
-        config: {
+            model: "gemini-2.5-flash",
+            contents: [{role: "user", parts: [{text: prompt}]}],
+            config: {
                 responseMimeType: "application/json",
             }
         });
 
         const aiResponse = JSON.parse(completion.candidates[0].content.parts[0].text);
-        console.log("AI Mapping Found:", aiResponse);
+        console.log("✅ AI Custom Answers Generated:", aiResponse);
+        for (const [key, value] of Object.entries(aiResponse)) {
+             // Find the original question label to pair it with the answer
+             const originalQuestion = domSkeleton.find(el => el.domId === key)?.label || "Unknown Question";
+             console.log(`   Q: "${originalQuestion}"`);
+             console.log(`   A: "${value}"\n`);
+        }
         
         res.json({success: true, fieldMappings : aiResponse});
 
     } catch (error) {
-        console.error("AI Analysis Failed: ", error);
+        console.error("❌ AI Analysis Failed: ", error);
         res.status(500).json({success: false, error: error.message});
     }
 });

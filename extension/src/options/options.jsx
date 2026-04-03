@@ -75,7 +75,8 @@ export default function OptionsApp() {
           : '',
         github: personalInfo.profiles?.github 
           ? `www.github.com/${personalInfo.profiles.github}` 
-          : ''
+          : '',
+        full_resume_data: result.data
       };
 
       // Update form with transformed data
