@@ -1,106 +1,170 @@
 import Fuse from 'fuse.js';
+import { KNOWN_SITES } from './known_sites';
 
 console.log("AI Job Applicator: Eyes open");
 
-const KNOWN_SITES = [
-    {
-        domain: "greenhouse.io",
-        selector: {
-            "first_name" : "#first_name",
-            "last_name" : "#last_name",
-            "email" : "#email",
-            "phone": "#phone",
-            "resume" : "button[aria-label='Upload Resume'], button[data-source='attach']"
-        }
-    },
-    {
-        domain : "lever.co",
-        selector : {
-            "first_name" : "input[name='name']",
-            "email" : "input[name='email']",
-            "phone" : "input[name='phone']",
-            "resume" : "input[type='file']"
-        }
-    }
-];
-
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if(request.type === "START_AUTOFILL"){
-        startAutofill(request.userProfile);
+        startAutofill(request.userProfile).then(() => {
+            sendResponse({status: "done"});
+        });
+        return true;
     }
 });
+
+// async function startAutofill(userProfile) {
+//     const hostname = window.location.hostname;
+//     console.log(`Detecting platform: ${hostname}`);
+
+//     // --- TIER 0: The Cache ---
+//     const cacheKey = `mapping_${hostname}`;
+//     const cachedData = await new Promise((resolve) => {
+//         chrome.storage.local.get([cacheKey], (result) => {
+//             resolve(result[cacheKey]);
+//         });
+//     });
+
+//     if (cachedData) {
+//         console.log(`⚡ Cache hit for ${hostname}! Skipping everything else.`);
+//         fillForm(cachedData, userProfile);
+//         return;
+//     }
+
+//     // --- TIER 1: Fast Lane ---
+//     // const matchedSite = KNOWN_SITES.find(site => hostname.includes(site.domain));
+//     // if (matchedSite) {
+//     //     console.log(`🏎️ Known site detected (${matchedSite.domain})!`);
+//     //     fillForm(matchedSite.selector, userProfile);
+//     //     return;
+//     // }
+
+//     console.log("🤖 Unknown site. Engaging Smart Scanner...");
+
+//     // 1. Grab the Job Description (for Cover Letters later)
+//     const jobDescription = getJobDescription();
+    
+//     // 2. Extract and prune the form fields
+//     const cleanElements = getSimplifiedDOM();
+
+//     if (cleanElements.length === 0) {
+//         console.log("No valid form inputs found on this page.");
+//         return;
+//     }
+
+//     // --- TIER 2: Local Fuzzy Matching ---
+//     const { localMapping, unresolvedElements } = performFuzzyMatching(cleanElements, userProfile);
+    
+//     console.log("🧠 Local matching solved:", localMapping);
+//     console.log("❓ Leftovers for AI:", unresolvedElements);
+
+//     const debugTable = unresolvedElements.map(el => ({ 
+//         Virtual_ID: el.domId, 
+//         Input_Type: el.type,
+//         Question_Label: el.label 
+//     }));
+//     console.table(debugTable);
+
+//     // If local matching solved EVERYTHING, we don't even need the AI!
+//     if (unresolvedElements.length === 0) {
+//         console.log("🎯 Local matching solved 100% of the form!");
+//         chrome.storage.local.set({ [cacheKey]: localMapping }); // Save to cache
+//         fillForm(localMapping, userProfile);
+//         return;
+//     }
+
+//     // --- TIER 3: AI Fallback ---
+//     console.log("Sending leftovers and JD to AI Backend...");
+
+//     // Notice we are sending an object now, not just an array
+//     chrome.runtime.sendMessage(
+//         { 
+//             type: "ANALYZE_PAGE_WITH_AI", 
+//             payload: {
+//                 domSkeleton: unresolvedElements,
+//                 jobDescription: jobDescription,
+//                 userProfile: userProfile
+//             } 
+//         },
+//         (response) => {
+//             if (response && response.success && response.mapping) {
+//                 console.log("✅ AI Identification complete:", response.mapping);
+                
+//                 // Combine our local Javascript matches with the AI's matches
+//                 const finalMapping = { ...localMapping, ...response.mapping };
+
+//                 // Save the COMPLETE mapping to cache so we never pay for this site again
+//                 chrome.storage.local.set({ [cacheKey]: finalMapping }, () => {
+//                     console.log(`💾 Saved complete mapping to cache for ${hostname}`);
+//                 });
+
+//                 fillForm(finalMapping, userProfile);
+//             } else {
+//                 console.error("AI failed or returned an error:", response?.error);
+//                 alert("AI could not read the remaining fields. Check console for errors.");
+                
+//                 // Even if AI fails, we can still fill what our local Javascript found!
+//                 fillForm(localMapping, userProfile); 
+//             }
+//         }
+//     );
+// }
 
 async function startAutofill(userProfile) {
     const hostname = window.location.hostname;
     console.log(`Detecting platform: ${hostname}`);
 
-    console.log("🕵️‍♂️ TRIPWIRE 1 - Received userProfile in startAutofill:", userProfile);
+    // --- TIER 1: ATS Database Match ---
+    const siteKey = Object.keys(KNOWN_SITES).find(domain => hostname.includes(domain));
+    const siteBlueprint = siteKey ? KNOWN_SITES[siteKey] : null;
 
-    // --- TIER 0: The Cache ---
-    const cacheKey = `mapping_${hostname}`;
-    const cachedData = await new Promise((resolve) => {
-        chrome.storage.local.get([cacheKey], (result) => {
-            resolve(result[cacheKey]);
-        });
-    });
+    let localMapping = {};
+    let customQuestionsForAI = [];
 
-    if (cachedData) {
-        console.log(`⚡ Cache hit for ${hostname}! Skipping everything else.`);
-        fillForm(cachedData, userProfile);
-        return;
+    if (siteBlueprint) {
+        console.log(`🏎️ Known ATS detected: ${siteBlueprint.name}. Engaging Fast Lane.`);
+        
+        // 1. Solve the obvious fields instantly using exact CSS selectors
+        for (const [profileKey, selector] of Object.entries(siteBlueprint.standardFields)) {
+            const element = document.querySelector(selector);
+            if (element && userProfile[profileKey]) {
+                localMapping[profileKey] = selector; // Map it directly!
+                element.classList.add("ai-handled-standard"); // Mark it so we don't scrape it later
+            }
+        }
+        
+        // 2. Scrape ONLY the remaining custom questions
+        customQuestionsForAI = getATSQuestions(siteBlueprint);
+    } else {
+        console.log("🤖 Unknown ATS. Engaging Universal Scanner...");
+        // 1. Grab all inputs from the page
+        const allCleanElements = getUniversalDOM(); // (This is your old getSimplifiedDOM)
+        
+        // 2. Run the fuzzy matcher locally to solve obvious fields
+        const fuzzyResults = performFuzzyMatching(allCleanElements, userProfile);
+        localMapping = fuzzyResults.localMapping;
+        customQuestionsForAI = fuzzyResults.unresolvedElements;
     }
 
-    // --- TIER 1: Fast Lane ---
-    // const matchedSite = KNOWN_SITES.find(site => hostname.includes(site.domain));
-    // if (matchedSite) {
-    //     console.log(`🏎️ Known site detected (${matchedSite.domain})!`);
-    //     fillForm(matchedSite.selector, userProfile);
-    //     return;
-    // }
+    console.log("⚡ Standard Fields solved locally:", localMapping);
+    console.log("❓ Custom Questions left for AI:", customQuestionsForAI);
 
-    console.log("🤖 Unknown site. Engaging Smart Scanner...");
-
-    // 1. Grab the Job Description (for Cover Letters later)
-    const jobDescription = getJobDescription();
-    
-    // 2. Extract and prune the form fields
-    const cleanElements = getSimplifiedDOM();
-
-    if (cleanElements.length === 0) {
-        console.log("No valid form inputs found on this page.");
-        return;
-    }
-
-    // --- TIER 2: Local Fuzzy Matching ---
-    const { localMapping, unresolvedElements } = performFuzzyMatching(cleanElements, userProfile);
-    
-    console.log("🧠 Local matching solved:", localMapping);
-    console.log("❓ Leftovers for AI:", unresolvedElements);
-
-    const debugTable = unresolvedElements.map(el => ({ 
-        Virtual_ID: el.domId, 
-        Input_Type: el.type,
-        Question_Label: el.label 
-    }));
-    console.table(debugTable);
-
-    // If local matching solved EVERYTHING, we don't even need the AI!
-    if (unresolvedElements.length === 0) {
-        console.log("🎯 Local matching solved 100% of the form!");
-        chrome.storage.local.set({ [cacheKey]: localMapping }); // Save to cache
+    // If there are no custom questions left, fill what we have and exit
+    if (customQuestionsForAI.length === 0) {
+        console.log("🎯 No custom questions found. Filling standard fields...");
         fillForm(localMapping, userProfile);
+        logJobApplication();
         return;
     }
 
-    // --- TIER 3: AI Fallback ---
-    console.log("Sending leftovers and JD to AI Backend...");
+    // --- TIER 3: AI Fallback for Custom Questions ---
+    console.log("Sending custom questions to AI Backend...");
+    const jobDescription = getJobDescription();
 
-    // Notice we are sending an object now, not just an array
     chrome.runtime.sendMessage(
         { 
             type: "ANALYZE_PAGE_WITH_AI", 
             payload: {
-                domSkeleton: unresolvedElements,
+                domSkeleton: customQuestionsForAI,
                 jobDescription: jobDescription,
                 userProfile: userProfile
             } 
@@ -109,27 +173,61 @@ async function startAutofill(userProfile) {
             if (response && response.success && response.mapping) {
                 console.log("✅ AI Identification complete:", response.mapping);
                 
-                // Combine our local Javascript matches with the AI's matches
+                // Combine our local matches with the AI's custom matches
                 const finalMapping = { ...localMapping, ...response.mapping };
-
-                // Save the COMPLETE mapping to cache so we never pay for this site again
-                chrome.storage.local.set({ [cacheKey]: finalMapping }, () => {
-                    console.log(`💾 Saved complete mapping to cache for ${hostname}`);
-                });
-
                 fillForm(finalMapping, userProfile);
+                logJobApplication();
             } else {
-                console.error("AI failed or returned an error:", response?.error);
-                alert("AI could not read the remaining fields. Check console for errors.");
-                
-                // Even if AI fails, we can still fill what our local Javascript found!
+                console.error("AI failed. Filling what we know.");
                 fillForm(localMapping, userProfile); 
+                logJobApplication();
             }
         }
     );
 }
 
-function getSimplifiedDOM() {
+function getATSQuestions(blueprint) {
+    const cleanElements = [];
+    const wrappers = document.querySelectorAll(blueprint.questionWrapper);
+    
+    let globalIndex = 0; // Use a continuous index for our virtual IDs
+
+    wrappers.forEach((wrapper) => {
+        // Find ALL inputs inside this wrapper (Fixes the Radio Button bug)
+        const inputSelectors = ["input", "textarea", "select", "[role='combobox']", "[role='radiogroup']", "[role='listbox']"].join(", ");
+        const inputs = wrapper.querySelectorAll(inputSelectors);
+        
+        inputs.forEach(input => {
+            // Skip if we already handled it in the Fast Lane
+            if (input.classList.contains("ai-handled-standard")) return;
+            
+            // Skip purely structural or hidden inputs
+            if (input.type === 'file' || input.type === 'submit') return;
+            if (input.type === 'hidden' && !input.parentElement.querySelector('button')) return;
+
+            const style = window.getComputedStyle(input);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
+
+            const labelText = getLabelText(input);
+            if (!labelText) return;
+
+            const refId = `ai_ref_${globalIndex}`;
+            cleanElements.push({
+                domId: refId,
+                type: input.type || input.getAttribute('role') || input.tagName.toLowerCase(),
+                label: labelText
+            });
+            
+            // Add a dataset attribute to the HTML so we can easily find it later during the fill phase
+            input.dataset.aiRef = refId; 
+            globalIndex++;
+        });
+    });
+
+    return cleanElements;
+}
+
+function getUniversalDOM() {
     
     const inputSelectors = [
         "input", 
@@ -159,13 +257,16 @@ function getSimplifiedDOM() {
         const labelText = getLabelText(el);
 
         // Skip if we couldn't find any text associated with it
-        if (!labelText.trim()) return;
+        if (!labelText) return;
 
+        let inputType = el.type || el.getAttribute('role') || el.tagName.toLocaleLowerCase();
+        el.dataset.aiRef = `ai_ref_${index}`;
+        
         cleanElements.push({
             domId: `ai_ref_${index}`,
-            type: el.type,
-            label: labelText.trim().replace(/\s+/g, ' '), // Clean up weird line breaks
-            selectorId: el.id // We keep this to focus/fill it later
+            type: inputType,
+            label: labelText, // Clean up weird line breaks
+            elementReference: el // We keep this to focus/fill it later
         });
     });
 
@@ -173,56 +274,106 @@ function getSimplifiedDOM() {
 }
 
 // Ensure your getLabelText function from before is still here!
-function getLabelText(element){
-    //check label for id
-    if(element.id){
-        const label = document.querySelector(`label[for="${element.id}"]`);
-        if(label){
-            return label.innerText;
+function getLabelText(element) {
+    let labelText = "";
+    let optionText = ""; // For radio/checkboxes 
+
+    if (element.type === 'radio' || element.type === 'checkbox'){
+        const parentLabel = element.closest("label");
+        if(parentLabel){
+            const clone = parentLabel.cloneNode(true);
+            const inputInside = clone.querySelector('input');
+            if(inputInside) clone.removeChild(inputInside);
+            optionText = clone.innerText.trim();
         }
     }
 
-    //check parent label
-    return element.closest("label")?.innerText || "";
+    // Method 1: The standard 'for' attribute (Works perfectly for the Greenhouse HTML)
+    if (element.id) {
+        const label = document.querySelector(`label[for="${element.id}"]`);
+        if (label) {
+            labelText = label.innerText;
+        }
+    }
+
+    // Method 2: Wrapped inside a <label> (Common in older sites)
+    if (!labelText) {
+        const questionContainer = element.closest('.application-question, .field-wrapper');
+        if (questionContainer) {
+           const labelDiv = questionContainer.querySelector('.application-label, .label, .text');
+            if (labelDiv) {
+                labelText = labelDiv.innerText;
+            }
+        }
+    }
+
+    // Method 3: Fallbacks (aria-label, placeholder, name)
+    if (!labelText) {
+        labelText = element.getAttribute('aria-label') || element.placeholder || element.name || "";
+    }
+
+    // Clean up text
+    let finalLabel = labelText.replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ').replace(/\*/g, '').trim();
+
+    // If this is a radio/checkbox, combine the question with the option
+    // e.g., "Are you authorized? (Option: Yes)"
+    if (optionText && finalLabel !== optionText) {
+        finalLabel = `${finalLabel} (Option: ${optionText})`;
+    }
+
+    return finalLabel;
 }
 
 function getJobDescription() {
-    // A heuristic approach: find containers that likely hold the job description
-    const selectors = [
-        '#job-description', '.job-description', '[data-ui="job-description"]',
-        '.posting-requirements', '.description', 'article'
-    ];
-    
-    for (const selector of selectors) {
-        const el = document.querySelector(selector);
-        if (el && el.innerText.length > 200) {
-            return el.innerText.substring(0, 3000); // Limit to 3000 chars to save AI tokens
+    try {
+        // A heuristic approach: find containers that likely hold the job description
+        const selectors = [
+            '#job-description', '.job-description', '[data-ui="job-description"]',
+            '.posting-requirements', '.description', 'article'
+        ];
+        
+        let targetDoc = document;
+        
+        // If we are in an iframe, try to look at the parent document (may be blocked by CORS)
+        if (window.self !== window.top) {
+            try {
+                if (window.parent.document) {
+                    targetDoc = window.parent.document;
+                }
+            } catch (e) {
+                console.log("CORS blocked reading parent window for JD. Falling back to local iframe text.");
+            }
         }
+
+        for (const selector of selectors) {
+            const el = targetDoc.querySelector(selector);
+            if (el && el.innerText.length > 200) {
+                return el.innerText.substring(0, 3000); 
+            }
+        }
+        
+        return targetDoc.body.innerText.substring(0, 3000); 
+    } catch (e) {
+        console.log("Could not extract Job Description", e);
+        return "Job description not available due to iframe restrictions.";
     }
-    
-    // Fallback: just grab the body text and hope for the best (chopped to save tokens)
-    return document.body.innerText.substring(0, 3000); 
 }
 
-function fillForm(mapping, userProfile) {
+async function fillForm(mapping, userProfile) {
     console.log("✍️ Filling form with mapping:", mapping);
 
     for (const [key, value] of Object.entries(mapping)) {
         let textToFill = "";
         let selector = "";
 
-        // Case 1: Local Mapping (e.g., key is "first_name", value is "ai_ref_0")
         if (userProfile[key]) {
             textToFill = userProfile[key];
             selector = value; 
-        } 
-        // Case 2: AI Direct Answer (e.g., key is "ai_ref_5", value is "My custom answer")
-        else {
+        } else {
             textToFill = value; 
             selector = key; 
         }
 
-        // Special Full Name Logic
         if (key === 'full_name' && !userProfile.full_name) {
              textToFill = `${userProfile.first_name} ${userProfile.last_name}`;
         }
@@ -231,25 +382,62 @@ function fillForm(mapping, userProfile) {
 
         let element = document.querySelector(selector) || document.getElementById(selector);
         
-        // Fallback: If it's a virtual ID like 'ai_ref_5', grab it by index
         if (!element && selector.startsWith('ai_ref_')) {
-            const index = parseInt(selector.replace('ai_ref_', ''));
-            const inputs = document.querySelectorAll("input, textarea, select");
-            element = inputs[index];
+            element = document.querySelector(`[data-ai-ref="${selector}"]`);
+        }
+
+        // Safely check if element exists
+        if (!element) {
+            console.log(`Could not find element in DOM for selector: ${selector}`);
+            continue; 
         }
 
         if(element.type === 'file'){
-                console.log(`Skipping file input for ${key}`)
+            console.log(`Skipping file input for ${key}`);
+            continue;
+        }
+
+        // === THE INJECTION LOGIC ===
+        element.focus();
+
+        const sibilingButtons = element.parentElement.querySelectorAll('button');
+        if(sibilingButtons.length > 0 && (element.type === 'checkbox' || element.type === 'hidden')){
+            console.log("Detected button group, attempting to click the correct option...");
+            let clicked = false;
+            for(const btn of sibilingButtons){
+                if (btn.innerText.toLowerCase().trim() === String(textToFill).toLowerCase().trim() ||
+                   (String(textToFill).toLowerCase() === 'true' && btn.innerText.toLowerCase() === 'yes') ||
+                   (String(textToFill).toLowerCase() === 'false' && btn.innerText.toLowerCase() === 'no')) {
+                    btn.click();
+                    clicked = true;
+                    break;
+                }
+            }
+            if(clicked){
+                element.blur();
                 continue;
             }
+        }
 
-        if (element) {
-            element.focus();
+        // Handle React Comboboxes (The New Boss)
+        if (element.getAttribute('role') === 'combobox') {
+            await fillReactDropdown(element, textToFill);
+        }
+        // Handle Checkboxes and Radio Buttons
+        else if (element.type === 'radio' || element.type === 'checkbox') {
+            if (textToFill === true || textToFill === "true" || textToFill === element.value) {
+                element.checked = true;
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        } 
+        // Handle standard text inputs, textareas, and standard <select> tags
+        else {
             element.value = textToFill;
             element.dispatchEvent(new Event('input', { bubbles: true }));
             element.dispatchEvent(new Event('change', { bubbles: true }));
-            element.blur();
         }
+        
+        element.blur();
     }
 }
 
@@ -302,4 +490,90 @@ function performFuzzyMatching(cleanElements, userProfile) {
     });
 
     return { localMapping, unresolvedElements };
+}
+
+async function fillReactDropdown(comboboxElement, textToFill) {
+    console.log(`Simulating human interaction for dropdown: `, textToFill);
+
+    //Find the actual hidden input inside the combobox wrapper
+    const input = comboboxElement.querySelector('input') || comboboxElement;
+
+    //click the combobox to open the menu
+    comboboxElement.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+    input.focus();
+
+    // 3. The React Value Setter Hack
+    // React overrides standard input setters. We have to bypass React's wrapper 
+    // and talk directly to the browser's native value setter.
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    if(nativeInputValueSetter){
+        nativeInputValueSetter.call(input, textToFill);
+    }else{
+        input.value = textToFill;
+    }
+
+    //tell react that a user just typed smthg 
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+
+    //wait for react to render 
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    //Find the rendered menu option
+    const options = document.querySelectorAll('[role="option"]');
+    let matchedOption = null;
+
+    //Look for the exact text match
+    for (const option of options) {
+        if (option.innerText.toLowerCase().trim() === textToFill.toLowerCase().trim() ||
+            option.innerText.toLowerCase().includes(textToFill.toLowerCase())) {
+            matchedOption = option;
+            break;
+        }
+    }
+
+    //Click the matching options, or hit enter as a fallback
+    if(matchedOption){
+        matchedOption.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    }else{
+        input.dispatchEvent(new KeyboardEvent('keydown', {bubbles: true, key: 'Enter', keyCode:13}));
+
+    }
+
+    input.blur();
+}
+
+
+//JOB tracking functions 
+function logJobApplication(){
+    const url = window.location.href;
+
+    //Page titles on job boards are usualy "Role at company"
+    let pageTitle = document.title || "Unknow Job";
+
+    //clean up annoying things: SDE 2 -> SDE
+    pageTitle = pageTitle.replace(/^\(\d+\)\s*/, '');
+
+    const newJob = {
+        id: Date.now().toString(),
+        roleAndCompany: pageTitle,
+        url: url,
+        dateApplied: new Date().toLocaleDateString(),
+        status: "Applied"
+    };
+
+    //Fetch existing jobs 
+    chrome.storage.local.get(['applied_jobs'], (result) => {
+        const jobs = result.applied_jobs || []; 
+
+        const alreadyTracked = jobs.some(job => job.url.split('?')[0] === url.split('?')[0]);
+
+        if(!alreadyTracked){
+            jobs.push(newJob);
+            chrome.storage.local.set({'applied_jobs': jobs}, () => {
+                console.log("Job Auto-Tracked:", newJob);
+            });
+        } else{
+            console.log("Job already tracked for this URL.")
+        }
+    })
 }
