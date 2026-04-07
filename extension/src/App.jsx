@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 function App(){
   const [status, setStatus] = useState("Idle");
   const [profile, setProfile] = useState(null);
+  const [isTailoring, setIsTailoring] = useState(false);
 
   //Loading the user's profile when the popup opens
   useEffect(() => {
@@ -52,7 +53,56 @@ function App(){
           if(response && response.success) setStatus("Cover Letter Written! ✍️");
           else setStatus("Error writing letter");
       });
-    };
+  };
+
+  const handleTailorResume = async () => {
+    if(!profile) return;
+    setIsTailoring(true);
+    setStatus("Scraping Job Description...");
+
+    try {
+      const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+
+      chrome.tabs.sendMessage(tab.id, {type: "GET_JOB_DESCRIPTION"}, async(response) => {
+        if(!response || !response.jobDescription){
+          setStatus("Could not find Job Description on this page.");
+          setIsTailoring(false);
+          return;
+        }
+
+        setStatus("AI is rewriting and compiling your resume. This takes few seconds...");
+
+        const res = await fetch('http://127.0.0.1:3000/tailor-resume', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            userProfile: profile,
+            jobDescription: response.jobDescription
+          })
+        })
+
+        if (!res.ok) throw new Error("Backend failed to generate PDF");
+
+        //Trigger the file download in the browser
+        const blob = await res.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `Tailored_Resume_${profile.first_name}.pdf`;
+        document.body.appendChile(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(downloadUrl);
+
+        setStatus("Tailored Resume Downloaded! Ready to Autofill..");
+        setIsTailoring(false);
+      });
+    } catch (error) {
+      console.error(error);
+      setStatus("Error generating resume..");
+      setIsTailoring(false);
+    }
+  }
 
   return (
     <div className="p-4 w-72 bg-slate-900 text-white border-t-4 boarder-purple-500">
@@ -69,6 +119,20 @@ function App(){
           {profile ? `${profile.first_name} ${profile.last_name}` : "No profile selected"}
         </p>
       </div>
+
+      <button 
+        onClick={handleTailorResume}
+        disabled={!profile || isTailoring}
+        className={`w-full font-bold py-2 px-4 rounded mb-2 flex justify-center items-center ${
+          profile && !isTailoring ? 'bg-amber-500 hover:bg-amber-400 text-slate-900' : 'bg-gray-600 text-gray-300 cursor-not-allowed'
+        }`}
+      >
+        {isTailoring ? (
+           <span className="animate-pulse">⏳ Compiling PDF...</span>
+        ) : (
+           "✨ 1. Tailor Resume (Pre-Flight)"
+        )}
+      </button>
 
       <button 
         onClick={handleApply}

@@ -1,4 +1,8 @@
 import {RESUME_PARSER_PROMPT} from "./prompt.js";
+import { generatePDF } from "./tailor-resume/utils/latex.js";
+import { analyzeFit }  from "./tailor-resume/agents/auditor.js";
+import { writeResumeContent } from "./tailor-resume/agents/writer.js";
+//import {parsePdfToJson} from "./tailor-resume/agents/parser.js";
 import express, { response } from "express";
 import {PDFParse } from "pdf-parse";
 import fs from "fs";
@@ -127,7 +131,6 @@ app.post('/analyze-dom', async (req, res) => {
     }
 });
 
-
 app.post('/parse-resume', upload.single('resume'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: "No file uploaded" });
@@ -168,6 +171,60 @@ app.post('/parse-resume', upload.single('resume'), async (req, res) => {
     } catch (error) {
         console.error("Gemini Error:", error);
         res.status(500).json({ error: "Parsing failed" });
+    }
+});
+
+app.post('/tailor-resume', async (req, res) => {
+    //const { userProfile, jobDescription } = req.body;
+
+    if (!req.body.userProfile || !req.body.jobDescription) {
+        console.warn("⚠️ Blocked a request with missing data.");
+            return res.status(400).json({ error: "Resume and Job Description are required." });
+    }
+
+    console.log("HiIIIIIIIIII: ", req.body.userProfile);
+    console.log(`✨ Tailoring resume for ${userProfile.first_name}...`);
+
+    try {
+        const {userProfile, jobDescription} = req.body;
+
+        if(!userProfile || !jobDescription){
+            console.warn("Blocked request with missing data.");
+            return res.status(400).json({ error: "Resume and Job Description are required." });
+        }
+
+        console.log("Received Request for: ", userProfile.first_name || "Unkown" );
+
+        console.log("1. Starting Audit..");
+        const auditResults = await analyzeFit(userProfile.full_resume_data, jobDescription);
+
+        console.log("2. Drafting Content...");
+        const aiGeneratedContent = await writeResumeContent(userProfile.full_resume_data, jobDescription, auditResults);
+
+        if (!aiGeneratedContent || !aiGeneratedContent.experience) {
+            console.error("AI Writer failed to format data correctly")
+            return res.status(500).json({ error: "AI failed to generate content." });
+        }
+        console.log("DEBUG: AI Content Keys:", Object.keys(aiGeneratedContent));
+
+        console.log("3. Compiling PDF...");
+        const pdfPath = await generatePDF(userProfile.full_resume_data, aiGeneratedContent);
+
+        console.log("4. Done...");
+        res.download(pdfPath, `Tailored_Resume_${userProfile.first_name}.pdf`, (err) => {
+            if (err) {
+                console.error("Error sending file:", err);
+            }
+            setTimeout(() => {
+                if (fs.existsSync(pdfFilePath)) {
+                    fs.unlinkSync(pdfFilePath); 
+                    // Also clean up .tex, .aux, .log files if your latex.js doesn't
+                }
+            }, 60000); 
+        });
+    } catch (error) {
+        console.error("❌ Tailoring Failed:", error);
+        res.status(500).json({ error: "Failed to generate tailored resume" });
     }
 });
 

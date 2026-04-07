@@ -8,106 +8,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         startAutofill(request.userProfile).then(() => {
             sendResponse({status: "done"});
         });
-        return true;
     }
+
+    if(request.type === 'GET_JOB_DESCRIPTION'){
+        console.log("Popup asked for JD. Scraping now...")
+        const jd = getJobDescription();
+        sendResponse({jobDescription: jd});
+    }
+
+    return true;
 });
-
-// async function startAutofill(userProfile) {
-//     const hostname = window.location.hostname;
-//     console.log(`Detecting platform: ${hostname}`);
-
-//     // --- TIER 0: The Cache ---
-//     const cacheKey = `mapping_${hostname}`;
-//     const cachedData = await new Promise((resolve) => {
-//         chrome.storage.local.get([cacheKey], (result) => {
-//             resolve(result[cacheKey]);
-//         });
-//     });
-
-//     if (cachedData) {
-//         console.log(`⚡ Cache hit for ${hostname}! Skipping everything else.`);
-//         fillForm(cachedData, userProfile);
-//         return;
-//     }
-
-//     // --- TIER 1: Fast Lane ---
-//     // const matchedSite = KNOWN_SITES.find(site => hostname.includes(site.domain));
-//     // if (matchedSite) {
-//     //     console.log(`🏎️ Known site detected (${matchedSite.domain})!`);
-//     //     fillForm(matchedSite.selector, userProfile);
-//     //     return;
-//     // }
-
-//     console.log("🤖 Unknown site. Engaging Smart Scanner...");
-
-//     // 1. Grab the Job Description (for Cover Letters later)
-//     const jobDescription = getJobDescription();
-    
-//     // 2. Extract and prune the form fields
-//     const cleanElements = getSimplifiedDOM();
-
-//     if (cleanElements.length === 0) {
-//         console.log("No valid form inputs found on this page.");
-//         return;
-//     }
-
-//     // --- TIER 2: Local Fuzzy Matching ---
-//     const { localMapping, unresolvedElements } = performFuzzyMatching(cleanElements, userProfile);
-    
-//     console.log("🧠 Local matching solved:", localMapping);
-//     console.log("❓ Leftovers for AI:", unresolvedElements);
-
-//     const debugTable = unresolvedElements.map(el => ({ 
-//         Virtual_ID: el.domId, 
-//         Input_Type: el.type,
-//         Question_Label: el.label 
-//     }));
-//     console.table(debugTable);
-
-//     // If local matching solved EVERYTHING, we don't even need the AI!
-//     if (unresolvedElements.length === 0) {
-//         console.log("🎯 Local matching solved 100% of the form!");
-//         chrome.storage.local.set({ [cacheKey]: localMapping }); // Save to cache
-//         fillForm(localMapping, userProfile);
-//         return;
-//     }
-
-//     // --- TIER 3: AI Fallback ---
-//     console.log("Sending leftovers and JD to AI Backend...");
-
-//     // Notice we are sending an object now, not just an array
-//     chrome.runtime.sendMessage(
-//         { 
-//             type: "ANALYZE_PAGE_WITH_AI", 
-//             payload: {
-//                 domSkeleton: unresolvedElements,
-//                 jobDescription: jobDescription,
-//                 userProfile: userProfile
-//             } 
-//         },
-//         (response) => {
-//             if (response && response.success && response.mapping) {
-//                 console.log("✅ AI Identification complete:", response.mapping);
-                
-//                 // Combine our local Javascript matches with the AI's matches
-//                 const finalMapping = { ...localMapping, ...response.mapping };
-
-//                 // Save the COMPLETE mapping to cache so we never pay for this site again
-//                 chrome.storage.local.set({ [cacheKey]: finalMapping }, () => {
-//                     console.log(`💾 Saved complete mapping to cache for ${hostname}`);
-//                 });
-
-//                 fillForm(finalMapping, userProfile);
-//             } else {
-//                 console.error("AI failed or returned an error:", response?.error);
-//                 alert("AI could not read the remaining fields. Check console for errors.");
-                
-//                 // Even if AI fails, we can still fill what our local Javascript found!
-//                 fillForm(localMapping, userProfile); 
-//             }
-//         }
-//     );
-// }
 
 async function startAutofill(userProfile) {
     const hostname = window.location.hostname;
@@ -541,7 +451,6 @@ async function fillReactDropdown(comboboxElement, textToFill) {
 
     input.blur();
 }
-
 
 //JOB tracking functions 
 function logJobApplication(){
