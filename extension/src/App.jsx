@@ -1,157 +1,149 @@
 import { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Sparkles, FileText, Settings, PenTool, Loader2, CheckCircle } from "lucide-react";
 
-//TODO : + also ai should refer his/her resume to answer other questions  picking up from resume like what did your last job role was and what did you learn there now to answer this question ai should give anser based on resume by tailoring it to that specific job role 
-
-function App(){
+export default function App() {
   const [status, setStatus] = useState("Idle");
   const [profile, setProfile] = useState(null);
   const [isTailoring, setIsTailoring] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0);
 
-  //Loading the user's profile when the popup opens
   useEffect(() => {
     chrome.storage.local.get(['default_profile'], (result) => {
-      if(result.default_profile){
+      if (result.default_profile) {
         setProfile(result.default_profile);
-        setStatus("Ready to Apply!");
-      }else{
-        setStatus("No Profile Found. Please upload resume in Options")
+        setStatus("Ready to dominate.");
+      } else {
+        setStatus("No Profile Found.");
       }
     });
   }, []);
 
-  const handleApply = async () => {
-    if(!profile){
-      //open option page if no profile exists
-      chrome.runtime.openOptionsPage();
-      return;
-    }
-
-    setStatus("Scanning...");
-
-    const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
-
-    //send the real profile data to content script
-    chrome.tabs.sendMessage(tab.id, {
-      type: "START_AUTOFILL",
-      userProfile: profile
-    });
-
-    setStatus("Autofill Command Sent!");
-  };
-
-  const handleCoverLetter = async () => {
-      if (!profile) return;
-      setStatus("Reading Job Description...");
-      
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-      // 3. Send REAL profile for Cover Letter generation too
-      chrome.tabs.sendMessage(tab.id, { 
-        type: "GENERATE_COVER_LETTER", 
-        userProfile: profile
-      }, (response) => {
-          if(response && response.success) setStatus("Cover Letter Written! ✍️");
-          else setStatus("Error writing letter");
-      });
-  };
+  const openOptions = () => chrome.runtime.openOptionsPage();
 
   const handleTailorResume = async () => {
-    if(!profile) return;
+    if (!profile) return;
     setIsTailoring(true);
-    setStatus("Scraping Job Description...");
+    setLoadingStep(1); // "Parsing JD..."
+    
+    // Simulating the steps for the sleek UI wait state
+    setTimeout(() => setLoadingStep(2), 2500); // "Aligning Skills..."
+    setTimeout(() => setLoadingStep(3), 5000); // "Formatting PDF..."
 
     try {
-      const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
-
-      chrome.tabs.sendMessage(tab.id, {type: "GET_JOB_DESCRIPTION"}, async(response) => {
-        if(!response || !response.jobDescription){
-          setStatus("Could not find Job Description on this page.");
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      chrome.tabs.sendMessage(tab.id, { type: "GET_JOB_DESCRIPTION" }, async (response) => {
+        if (!response?.jobDescription) {
+          setStatus("Could not find Job Description.");
           setIsTailoring(false);
           return;
         }
 
-        setStatus("AI is rewriting and compiling your resume. This takes few seconds...");
-
         const res = await fetch('http://127.0.0.1:3000/tailor-resume', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            userProfile: profile,
-            jobDescription: response.jobDescription
-          })
-        })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userProfile: profile, jobDescription: response.jobDescription })
+        });
 
-        if (!res.ok) throw new Error("Backend failed to generate PDF");
+        if (!res.ok) throw new Error("Backend failed");
 
-        //Trigger the file download in the browser
         const blob = await res.blob();
         const downloadUrl = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = downloadUrl;
         a.download = `Tailored_Resume_${profile.first_name}.pdf`;
-        document.body.appendChile(a);
+        document.body.appendChild(a);
         a.click();
         a.remove();
         window.URL.revokeObjectURL(downloadUrl);
 
-        setStatus("Tailored Resume Downloaded! Ready to Autofill..");
+        setStatus("Resume Compiled.");
         setIsTailoring(false);
       });
     } catch (error) {
       console.error(error);
-      setStatus("Error generating resume..");
+      setStatus("Generation failed.");
       setIsTailoring(false);
     }
-  }
+  };
+
+  const handleApply = async () => {
+    if (!profile) return openOptions();
+    setStatus("Injecting data...");
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    chrome.tabs.sendMessage(tab.id, { type: "START_AUTOFILL", userProfile: profile });
+    setStatus("Autofill Complete.");
+  };
 
   return (
-    <div className="p-4 w-72 bg-slate-900 text-white border-t-4 boarder-purple-500">
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-xl font-bold">AI Applicator</h1>
-        <button onClick={() => chrome.runtime.openOptionsPage()} className="text-gray-400 hover:text-white">
-          ⚙️
+    <div className="w-96 bg-white text-slate-900 font-sans overflow-hidden shadow-2xl selection:bg-indigo-100">
+      {/* Header */}
+      <div className="flex justify-between items-center px-6 py-5 bg-gray-50/50 border-b border-gray-100">
+        <div>
+          <h1 className="text-sm font-bold tracking-tight text-gray-900">
+            {profile ? `Welcome, ${profile.first_name}` : "AI Applicator"}
+          </h1>
+          <p className="text-xs text-slate-500 font-medium mt-0.5">{status}</p>
+        </div>
+        <button onClick={openOptions} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
+          <Settings className="w-4 h-4 text-gray-600" />
         </button>
       </div>
 
-      <div className="mb-4 p-3 bg-slate-800 rounded-lg text-sm">
-        <p className="text-gray-400 text-xs uppercase font-bold mb-1">Active Profile</p>
-        <p className="font-medium truncate">
-          {profile ? `${profile.first_name} ${profile.last_name}` : "No profile selected"}
-        </p>
+      {/* Main Content */}
+      <div className="p-6 pb-8">
+        <AnimatePresence mode="wait">
+          {isTailoring ? (
+            <motion.div
+              key="loading"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="flex flex-col items-center justify-center py-8 space-y-4"
+            >
+              <div className="relative">
+                <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
+                <motion.div 
+                  className="absolute inset-0 rounded-full border-2 border-indigo-200"
+                  animate={{ scale: [1, 1.2, 1], opacity: [0.5, 0, 0.5] }}
+                  transition={{ repeat: Infinity, duration: 2 }}
+                />
+              </div>
+              <div className="text-center font-mono text-xs text-slate-500 space-y-1">
+                <p className={loadingStep >= 1 ? "text-indigo-600 font-semibold" : "opacity-50"}>&gt; Parsing JD...</p>
+                <p className={loadingStep >= 2 ? "text-indigo-600 font-semibold" : "opacity-50"}>&gt; Aligning Skills...</p>
+                <p className={loadingStep >= 3 ? "text-indigo-600 font-semibold" : "opacity-50"}>&gt; Compiling PDF...</p>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="actions"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="space-y-3"
+            >
+              <button
+                onClick={handleApply}
+                disabled={!profile}
+                className="group relative w-full flex items-center justify-between p-4 bg-indigo-600 disabled:bg-gray-200 hover:bg-indigo-700 text-white disabled:text-gray-400 rounded-2xl transition-all shadow-[0_8px_30px_rgb(79,70,229,0.15)] disabled:shadow-none overflow-hidden"
+              >
+                <span className="font-semibold tracking-wide text-sm relative z-10">Auto-Fill Application</span>
+                <Sparkles className="w-5 h-5 relative z-10" />
+                <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-10 transition-opacity" />
+              </button>
+
+              <button
+                onClick={handleTailorResume}
+                disabled={!profile}
+                className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 disabled:bg-gray-50 text-gray-900 disabled:text-gray-400 border border-gray-200 rounded-2xl transition-colors font-semibold tracking-wide text-sm"
+              >
+                Tailor Resume for this JD
+                <FileText className="w-5 h-5" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-
-      <button 
-        onClick={handleTailorResume}
-        disabled={!profile || isTailoring}
-        className={`w-full font-bold py-2 px-4 rounded mb-2 flex justify-center items-center ${
-          profile && !isTailoring ? 'bg-amber-500 hover:bg-amber-400 text-slate-900' : 'bg-gray-600 text-gray-300 cursor-not-allowed'
-        }`}
-      >
-        {isTailoring ? (
-           <span className="animate-pulse">⏳ Compiling PDF...</span>
-        ) : (
-           "✨ 1. Tailor Resume (Pre-Flight)"
-        )}
-      </button>
-
-      <button 
-        onClick={handleApply}
-        disabled={!profile}
-        className={`w-full font-bold py-2 px-4 rounded mb-2 ${profile ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-600 cursor-not-allowed'}`}
-      >
-        {profile ? "Autofill Form" : "Setup Profile First"}
-      </button>
-
-      <button
-        onClick={handleCoverLetter}
-        disabled={!profile}
-        className={`w-full font-bold py-2 px-4 rounded ${profile ? 'bg-purple-600 hover:bg-purple-500' : 'bg-gray-600 cursor-not-allowed'}`}
-        >
-          Write Cover Letter
-        </button>
-        <p className="mt-3 text-center text-xs text-gray-500">{status}</p>
     </div>
   );
 }
-
-export default App;

@@ -141,7 +141,7 @@ app.post('/parse-resume', upload.single('resume'), async (req, res) => {
         const mimeType = req.file.mimetype;
 
         const result = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-3-flash-preview",
             contents: [
                 {
                     role: "user",
